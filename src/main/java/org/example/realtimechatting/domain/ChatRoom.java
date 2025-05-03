@@ -9,12 +9,13 @@ import org.springframework.web.socket.WebSocketSession;
 public class ChatRoom {
     private String id;
     private String name;
-    private Set<WebSocketSession> sessions = new HashSet<>();
+    private Set<WebSocketSession> sessions;
 
     public static ChatRoom of(String id, String name) {
         ChatRoom room = new ChatRoom();
         room.id = id;
         room.name = name;
+        room.sessions = new HashSet<>();
         return room;
     }
 
