@@ -1,53 +1,70 @@
 package org.example.realtimechatting.service;
 
 import com.google.common.collect.Lists;
-import jakarta.annotation.PostConstruct;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.example.realtimechatting.domain.ChatRoom;
+import org.example.realtimechatting.dto.ChatMessageDto;
+import org.example.realtimechatting.model.ChatRoom;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.web.socket.WebSocketSession;
 
 @Slf4j
 @RequiredArgsConstructor
 @Service
 public class ChatService {
 
-    private Map<String, ChatRoom> chatRooms;
+    private static final String CHAT_ROOM_USERS_KEY_FORMAT = "chat:room:%s:users";
 
-    @PostConstruct
-    private void init() {
-        chatRooms = new LinkedHashMap<>();
-    }
+    private static final Map<String, ChatRoom> chatRoomStore = new LinkedHashMap<>();
 
-    public void enterRoom(String roomId, WebSocketSession session) {
-        ChatRoom chatRoom = findRoomById(roomId);
-        chatRoom.addUserChatSession(session);
-    }
+    private final RedisTemplate<String, Object> redisTemplate;
 
     public List<ChatRoom> findAllRoom() {
-        return Lists.newArrayList(chatRooms.values());
+        if (chatRoomStore.isEmpty()) {
+            return Lists.newArrayList();
+        }
+
+        return Lists.newArrayList(chatRoomStore.values());
     }
 
     public ChatRoom findRoomById(String roomId) {
-        return chatRooms.get(roomId);
+        return chatRoomStore.get(roomId);
     }
 
     public ChatRoom createRoom(String name) {
         String randomId = UUID.randomUUID().toString();
-
         ChatRoom chatRoom = ChatRoom.of(randomId, name);
-        chatRooms.put(randomId, chatRoom);
+        chatRoomStore.put(randomId, chatRoom);
 
         return chatRoom;
     }
 
-    public void remove(String roomId, WebSocketSession session) {
-        ChatRoom chatRoom = chatRooms.get(roomId);
-        chatRoom.removeUserChatSession(session);
+    public void enterRoom(ChatMessageDto dto) {
+        String chatRoomUsersKey = String.format(CHAT_ROOM_USERS_KEY_FORMAT, dto.getRoomId());
+        redisTemplate.opsForSet().add(chatRoomUsersKey, dto.getWriter());
+
+        dto.setMessage(dto.getWriter() + "님이 채팅방에 참여하였습니다.");
+        sendMessage(dto);
+    }
+
+    public void leaveRoom(ChatMessageDto dto) {
+        String chatRoomUsersKey = String.format(CHAT_ROOM_USERS_KEY_FORMAT, dto.getRoomId());
+        redisTemplate.opsForSet().remove(chatRoomUsersKey, dto.getWriter());
+
+        dto.setMessage(dto.getWriter() + "님이 채팅방을 나갔습니다.");
+        sendMessage(dto);
+    }
+
+    public void sendMessage(ChatMessageDto dto) {
+        redisTemplate.convertAndSend(getChatRoomTopic(dto.getRoomId()), dto);
+    }
+
+
+    private String getChatRoomTopic(String roomId) {
+        return "chat:room:" + roomId;
     }
 }
